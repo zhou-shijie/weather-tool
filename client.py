@@ -1,6 +1,7 @@
 import time
 import requests
 from requests.exceptions import Timeout,RequestException,ConnectionError
+from errors import CityNotFoundError, WeatherAuthError, WeatherServiceError
 from logger import setup_logger
 
 logger=setup_logger("weather")
@@ -16,6 +17,13 @@ class WeatherClient:
     def _get_city_location_id(self,city_name,key):
         geo_url = "https://mf7p45cfey.re.qweatherapi.com/geo/v2/city/lookup"
         response=requests.get(geo_url,timeout=self.timeout,params={"location":city_name,"key":key})
+
+        #先判状态码再 raise_for_status
+        if response.status_code in (401,403):
+            raise WeatherAuthError(f"认证失败：{response.status_code}")
+        if response.status_code in (400,404):
+            raise CityNotFoundError(city_name)
+
         response.raise_for_status()
         res_json=response.json()
         if res_json["code"]== "200":
@@ -29,7 +37,7 @@ class WeatherClient:
         from config import QWEATHER_KEY
         location_id=self._get_city_location_id(city_name,QWEATHER_KEY)
         if not location_id:
-            raise RuntimeError("无法找到该城市")
+            raise CityNotFoundError(city_name)
 
         for i in range(self.max_retry):
             try:
@@ -44,12 +52,25 @@ class WeatherClient:
                     return weather_str
                 else:
                     logger.warning(f"第 {i+1} 次请求返回错误码：{res_json['code']}")
-            except Exception as e:
-                logger.warning(f"第 {i+1} 次请求失败：{e}")
+            
+            except(WeatherAuthError,CityNotFoundError):
+                raise   # 这两类不重试，直接往上抛
 
+            except (Timeout,ConnectionError) as e:
+                 logger.warning(f"第 {i+1} 次请求失败：{e}")
+                 if i==self.max_retry:
+                     raise WeatherAuthError("网络错误，重试次数耗尽") from e
+
+            except Exception as e:
+                   # 其他错（如 5xx HTTPError）今天先不细分，按服务不可用处理
+                logger.warning(f"第 {i+1} 次请求失败：{e}")
+                if i == self.max_retry - 1:
+                    raise WeatherServiceError(str(e)) from e    
+
+                
             if i < self.max_retry - 1:          # 最后一次失败后不必再等
                 wait = 2 ** i                    # 1s, 2s, 4s ...
                 logger.info(f"{wait}s 后重试")
                 time.sleep(wait)         
-        raise RuntimeError("天气查询多次重试失败")        
+        raise WeatherAuthError("天气查询多次重试失败")        
                 

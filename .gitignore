@@ -2,5 +2,6 @@
 .env
 weather.log
 result.json
+notes_w1d7
 __pycache__/
 *.pyc

@@ -1,11 +1,11 @@
 import json
 import sys
+import uuid
 from pathlib import Path
-
 from config import WEATHER_API_URL, API_TIMEOUT
 from client import WeatherClient
-from logger import setup_logger
-
+from logger import setup_logger,set_request_id
+from errors import CityNotFoundError, WeatherAuthError, WeatherServiceError
 logger = setup_logger("weather")
 
 
@@ -24,6 +24,10 @@ def save_result(city, weather_text):
 
 
 if __name__ == "__main__":
+    #生成唯一 ID
+    rid=uuid.uuid4().hex[:8]
+    #告诉日志模块，这次请求的 ID 是什么
+    set_request_id(rid)
 
     import argparse
     #创建命令行参数解析器
@@ -45,9 +49,15 @@ if __name__ == "__main__":
         print(weather_result)
         if not save_result(city, weather_result):
             sys.exit(1)
-    except RuntimeError as e:
-        logger.error(e)
-        sys.exit(1)
+    except CityNotFoundError as e:
+        logger.error("城市不存在，请检查城市名")
+        sys.exit(2)
+    except WeatherAuthError as e:
+        logger.error("认证失败，请检查 QWEATHER_KEY")
+        sys.exit(3)
+    except WeatherServiceError as e:
+        logger.error("服务暂不可用，请稍后再试")
+        sys.exit(4)                  
     except Exception as e:
         logger.exception(f"未预期的错误: {e}")
         sys.exit(1)
